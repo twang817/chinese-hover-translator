@@ -5,7 +5,7 @@
 // chrome.storage.local so results survive the MV3 worker being suspended and
 // even a browser restart.
 
-const DEFAULT_SERVER = "http://MLTX-TWANG.local:5001";
+const DEFAULT_SERVER = "http://localhost:5001";
 const mem = new Map();               // text -> {segments}  (fast, ephemeral)
 const KEY = (text) => "c:" + text;   // storage key namespace
 
@@ -38,6 +38,27 @@ async function translate(text) {
   return data;
 }
 
+function abToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+// Fetch TTS audio from the background (extension context) so it isn't subject to
+// the page's mixed-content upgrade, then hand it back as a data: URL to play.
+async function tts(text, voice) {
+  const server = await getServer();
+  const url = `${server}/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(text)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`tts ${r.status}`);
+  const buf = await r.arrayBuffer();
+  return "data:audio/wav;base64," + abToBase64(buf);
+}
+
 async function clearCache() {
   mem.clear();
   const all = await chrome.storage.local.get(null);
@@ -52,6 +73,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then(sendResponse)
       .catch((e) => sendResponse({ error: String(e.message || e) }));
     return true; // async reply
+  }
+  if (msg && msg.type === "tts") {
+    tts(msg.text, msg.voice || "zf_xiaoxiao")
+      .then((dataUrl) => sendResponse({ dataUrl }))
+      .catch((e) => sendResponse({ error: String(e.message || e) }));
+    return true;
   }
   if (msg && msg.type === "clearCache") {
     clearCache()

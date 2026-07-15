@@ -8,11 +8,6 @@ const VOICE = "zf_xiaoxiao";
 const HOVER_DELAY = 400;              // ms mouse must rest before firing
 const MAX_LEN = 200;                  // don't translate huge blobs
 
-let SERVER = "http://MLTX-TWANG.local:5001";
-if (chrome.storage) {
-  chrome.storage.local.get("server").then((r) => { if (r && r.server) SERVER = r.server.replace(/\/+$/, ""); }).catch(() => {});
-}
-
 let host, shadow, box, currentText = null;
 let moveTimer = null, hideTimer = null, lastXY = { x: 0, y: 0 }, audio = null;
 
@@ -65,6 +60,27 @@ function hide() { if (box) box.style.display = "none"; currentText = null; }
 function scheduleHide() { clearTimeout(hideTimer); hideTimer = setTimeout(hide, 500); }
 function cancelHide() { clearTimeout(hideTimer); }
 
+// After the extension is reloaded/updated, content scripts already injected in
+// open tabs are orphaned and chrome.runtime throws. Detect that and go quiet.
+function extAlive() {
+  try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
+}
+function teardown() {
+  try {
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("scroll", hide, true);
+  } catch (e) { /* ignore */ }
+  hide();
+}
+function browserSpeak(text) {
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-CN";
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  } catch (e) { /* best effort */ }
+}
+
 function sentenceAt(x, y) {
   let range = null;
   if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
@@ -113,16 +129,19 @@ function fire() {
   box.innerHTML = '<div class="msg">译…</div>';
   place(info.rect);
   const text = info.text, rect = info.rect;
-  chrome.runtime.sendMessage({ type: "translate", text }, (resp) => {
-    if (currentText !== text) return;              // moved on already
-    if (chrome.runtime.lastError || !resp || resp.error) {
-      const m = (resp && resp.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || "error";
-      box.innerHTML = '<div class="err">⚠ ' + m + "</div>";
-      place(rect);
-      return;
-    }
-    render(resp.segments || [], rect);
-  });
+  if (!extAlive()) { teardown(); return; }
+  try {
+    chrome.runtime.sendMessage({ type: "translate", text }, (resp) => {
+      if (currentText !== text) return;              // moved on already
+      if (chrome.runtime.lastError || !resp || resp.error) {
+        const m = (resp && resp.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || "error";
+        box.innerHTML = '<div class="err">⚠ ' + m + "</div>";
+        place(rect);
+        return;
+      }
+      render(resp.segments || [], rect);
+    });
+  } catch (e) { teardown(); }
 }
 
 function render(segs, rect) {
@@ -146,11 +165,19 @@ function render(segs, rect) {
 }
 
 function speak(text) {
+  try { if (audio) audio.pause(); } catch (e) {}
+  if (!extAlive()) { browserSpeak(text); return; }
+  // Fetch via the background worker (data: URL) so it isn't mixed-content-blocked
+  // on HTTPS pages; fall back to the browser's built-in voice if that fails.
   try {
-    if (audio) audio.pause();
-    audio = new Audio(`${SERVER}/tts?voice=${encodeURIComponent(VOICE)}&text=${encodeURIComponent(text)}`);
-    audio.play().catch(() => {});
-  } catch (e) { /* best effort */ }
+    chrome.runtime.sendMessage({ type: "tts", text, voice: VOICE }, (resp) => {
+      if (chrome.runtime.lastError || !resp || resp.error || !resp.dataUrl) {
+        browserSpeak(text);
+        return;
+      }
+      try { audio = new Audio(resp.dataUrl); audio.play().catch(() => {}); } catch (e) {}
+    });
+  } catch (e) { browserSpeak(text); }
 }
 
 document.addEventListener("mousemove", onMove, true);

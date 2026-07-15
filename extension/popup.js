@@ -1,4 +1,4 @@
-const DEFAULT_SERVER = "http://MLTX-TWANG.local:5001";
+const DEFAULT_SERVER = "http://localhost:5001";
 const input = document.getElementById("server");
 const status = document.getElementById("status");
 
