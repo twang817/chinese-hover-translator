@@ -9,7 +9,7 @@ const HOVER_DELAY = 400;              // ms mouse must rest before firing
 const MAX_LEN = 200;                  // don't translate huge blobs
 
 let host, shadow, box, currentText = null;
-let moveTimer = null, hideTimer = null, lastXY = { x: 0, y: 0 }, audio = null;
+let moveTimer = null, hideTimer = null, lastXY = { x: 0, y: 0 };
 
 const CSS = `
 .tip{ position:fixed; max-width:360px; background:#fff; color:#1a1a1a;
@@ -165,17 +165,13 @@ function render(segs, rect) {
 }
 
 function speak(text) {
-  try { if (audio) audio.pause(); } catch (e) {}
   if (!extAlive()) { browserSpeak(text); return; }
-  // Fetch via the background worker (data: URL) so it isn't mixed-content-blocked
-  // on HTTPS pages; fall back to the browser's built-in voice if that fails.
+  // The background fetches the audio and plays it in an offscreen document, so
+  // the page's CSP / mixed-content rules can't block it. Fall back to the
+  // browser's built-in voice only if that whole path errors.
   try {
     chrome.runtime.sendMessage({ type: "tts", text, voice: VOICE }, (resp) => {
-      if (chrome.runtime.lastError || !resp || resp.error || !resp.dataUrl) {
-        browserSpeak(text);
-        return;
-      }
-      try { audio = new Audio(resp.dataUrl); audio.play().catch(() => {}); } catch (e) {}
+      if (chrome.runtime.lastError || !resp || resp.error) browserSpeak(text);
     });
   } catch (e) { browserSpeak(text); }
 }
