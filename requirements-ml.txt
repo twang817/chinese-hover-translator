@@ -1,0 +1,5 @@
+kokoro
+misaki[zh]
+soundfile
+fastapi
+uvicorn[standard]

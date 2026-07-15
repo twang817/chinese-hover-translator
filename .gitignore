@@ -1,0 +1,9 @@
+venv/
+ml-venv/
+__pycache__/
+*.pyc
+.DS_Store
+voice-samples/
+server.log
+chinese-hover-translator.zip
+.claude/settings.local.json

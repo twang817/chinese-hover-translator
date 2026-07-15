@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body{ font:13px -apple-system,"Segoe UI",Roboto,sans-serif; width:260px; padding:12px; margin:0; }
+  h1{ font-size:13px; margin:0 0 8px; }
+  label{ display:block; color:#666; margin-bottom:4px; }
+  input{ width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #ccc; border-radius:6px; font:inherit; }
+  button{ margin-top:8px; width:100%; padding:7px; border:none; border-radius:6px; background:#10a37f; color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button.secondary{ background:#eee; color:#333; }
+  .status{ margin-top:6px; color:#10a37f; font-size:12px; height:14px; }
+</style>
+</head>
+<body>
+  <h1>Chinese Hover Translator</h1>
+  <label for="server">Mac server URL</label>
+  <input id="server" type="text" placeholder="http://MLTX-TWANG.local:5001">
+  <button id="save">Save</button>
+  <button id="clear" class="secondary">Clear cache</button>
+  <div class="status" id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

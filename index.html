@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>译 · Chinese Translator</title>
+<style>
+  :root{
+    --bg:#ffffff; --panel:#f7f7f8; --panel-2:#ffffff; --border:#e5e5e7;
+    --text:#1a1a1a; --muted:#6b6b70; --accent:#10a37f; --accent-weak:#e7f6f1;
+    --user-bg:#f0f0f2; --note-bg:#fff8e6; --note-border:#f0d98a; --note-text:#7a5b00;
+    --pinyin:#8a6d3b; --shadow:0 1px 2px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1a1a1c; --panel:#232326; --panel-2:#2a2a2e; --border:#38383c;
+      --text:#ececf1; --muted:#9a9aa2; --accent:#19c39c; --accent-weak:#173a33;
+      --user-bg:#2f2f34; --note-bg:#332c14; --note-border:#5c4f22; --note-text:#e6cf8a;
+      --pinyin:#c9a86a; --shadow:0 1px 2px rgba(0,0,0,.3);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column; height:100vh; height:100dvh;
+  }
+  header{
+    padding:12px 20px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:10px; flex:0 0 auto;
+  }
+  header .logo{font-size:20px}
+  header h1{font-size:15px; font-weight:600; margin:0}
+  header .status{margin-left:auto; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px}
+  header .dot{width:8px;height:8px;border-radius:50%;background:#c0392b}
+  header .dot.on{background:var(--accent)}
+  .clear-btn{
+    font:inherit; font-size:13px; color:var(--muted); background:transparent;
+    border:1px solid var(--border); border-radius:8px; padding:5px 10px; cursor:pointer;
+  }
+  .clear-btn:hover{background:var(--panel); color:var(--text)}
+  .model-sel{
+    font:inherit; font-size:12px; color:var(--text); background:var(--panel);
+    border:1px solid var(--border); border-radius:8px; padding:5px 8px; cursor:pointer;
+  }
+
+  #feed{flex:1 1 auto; overflow-y:auto; padding:24px 0}
+  .wrap{max-width:820px; margin:0 auto; padding:0 20px}
+
+  .exchange{margin-bottom:28px}
+  .user-msg{
+    background:var(--user-bg); border:1px solid var(--border); border-radius:12px;
+    padding:12px 14px; white-space:pre-wrap; word-break:break-word;
+    font-size:14px; color:var(--muted); max-height:180px; overflow:auto; margin-bottom:16px;
+  }
+  .user-msg.ask{background:var(--accent-weak); color:var(--text); border-color:var(--accent)}
+  .assistant-msg{
+    border:1px solid var(--border); border-radius:12px; background:var(--panel-2);
+    padding:12px 14px; white-space:pre-wrap; word-break:break-word;
+    box-shadow:var(--shadow); font-size:15.5px;
+  }
+
+  .segment{
+    border:1px solid var(--border); border-radius:12px; background:var(--panel-2);
+    padding:12px 14px; margin-bottom:10px; box-shadow:var(--shadow);
+    display:grid; grid-template-columns:auto 1fr; gap:2px 12px; align-items:baseline;
+  }
+  .seg-speaker{
+    grid-column:1; grid-row:1 / span 4; align-self:start;
+    font-weight:600; color:var(--accent); font-size:14px; white-space:nowrap;
+    padding-top:1px; min-width:0;
+  }
+  .seg-body{grid-column:2; min-width:0}
+  .seg-original{font-size:17px; word-break:break-word}
+  .seg-original.playable{cursor:pointer}
+  .play-icon{font-size:13px; opacity:.4; user-select:none}
+  .seg-original.playable:hover .play-icon{opacity:.85}
+  .seg-original.speaking{color:var(--accent)}
+  .seg-original.speaking .play-icon{opacity:1}
+  .seg-pinyin{color:var(--pinyin); font-size:14px; margin-top:1px; word-break:break-word}
+  .seg-translation{margin-top:4px; word-break:break-word}
+  .seg-notes{
+    margin-top:8px; background:var(--note-bg); border:1px solid var(--note-border);
+    color:var(--note-text); border-radius:8px; padding:6px 9px; font-size:13.5px;
+  }
+  .no-speaker .seg-body{grid-column:1 / span 2}
+
+  .resp-tools{display:flex; justify-content:flex-end; margin-top:8px}
+  .copy-btn{
+    font:inherit; font-size:13px; color:var(--muted); background:transparent;
+    border:1px solid var(--border); border-radius:8px; padding:5px 10px; cursor:pointer;
+  }
+  .copy-btn:hover{background:var(--panel); color:var(--text)}
+
+  .typing{display:flex; gap:5px; padding:8px 2px}
+  .typing span{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.5;animation:blink 1.2s infinite}
+  .typing span:nth-child(2){animation-delay:.2s}
+  .typing span:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:.9}}
+
+  .err{color:#c0392b; background:rgba(192,57,43,.08); border:1px solid rgba(192,57,43,.3);
+       border-radius:10px; padding:10px 12px; font-size:14px}
+
+  .empty{color:var(--muted); text-align:center; margin-top:12vh; font-size:15px}
+  .empty .big{font-size:34px; margin-bottom:10px}
+
+  footer{flex:0 0 auto; border-top:1px solid var(--border); background:var(--bg); padding:12px 0 16px}
+  .composer{display:flex; gap:10px; align-items:flex-end}
+  textarea{
+    flex:1; resize:none; font:inherit; color:var(--text); background:var(--panel);
+    border:1px solid var(--border); border-radius:14px; padding:12px 14px;
+    max-height:200px; min-height:52px; outline:none;
+  }
+  textarea:focus{border-color:var(--accent)}
+  .composer.ask textarea{border-color:var(--accent); background:var(--accent-weak)}
+  #send{
+    flex:0 0 auto; height:52px; padding:0 20px; border:none; border-radius:14px;
+    background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer;
+  }
+  #send:disabled{opacity:.5; cursor:default}
+  .hint{max-width:820px;margin:6px auto 0;padding:0 20px;font-size:12px;color:var(--muted);text-align:center}
+
+  .jump-btn{
+    position:fixed; left:50%; transform:translateX(-50%); bottom:98px;
+    background:var(--accent); color:#fff; border:none; border-radius:20px;
+    padding:8px 16px; font:inherit; font-size:13px; font-weight:600; cursor:pointer;
+    box-shadow:0 3px 10px rgba(0,0,0,.25); z-index:5;
+    opacity:0; pointer-events:none; transition:opacity .15s;
+  }
+  .jump-btn.show{opacity:1; pointer-events:auto}
+
+  .toast{
+    position:fixed; top:56px; left:50%; transform:translateX(-50%);
+    background:var(--accent); color:#fff; padding:8px 16px; border-radius:20px;
+    font-size:13px; font-weight:600; box-shadow:0 3px 10px rgba(0,0,0,.25);
+    z-index:10; opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <header>
+    <span class="logo">译</span>
+    <h1>Chinese Translator</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">connecting…</span></div>
+    <select id="modelSel" class="model-sel" title="Translation model">
+      <option value="qwen/qwen3.6-35b-a3b">35B · rich notes</option>
+      <option value="qwen/qwen3.5-9b">9B · fast</option>
+      <option value="">Auto (loaded)</option>
+    </select>
+    <button id="clearBtn" class="clear-btn">Clear</button>
+  </header>
+
+  <div id="feed">
+    <div class="wrap" id="feedWrap">
+      <div class="empty" id="empty">
+        <div class="big">译</div>
+        Paste a chat log — Chinese, English, emojis, multiple speakers.<br>
+        Each line comes back with pinyin, translation, and context notes.<br>
+        <span style="opacity:.8">Start a line with <b>&gt;</b> to ask the assistant a question instead.</span>
+      </div>
+    </div>
+  </div>
+
+  <button id="jumpBtn" class="jump-btn">↓ New messages</button>
+  <div id="toast" class="toast"></div>
+
+  <footer>
+    <div class="wrap">
+      <div class="composer">
+        <textarea id="input" placeholder="Paste Chinese to translate…  or start with &gt; to ask the assistant  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+        <button id="send">Send</button>
+      </div>
+    </div>
+    <div class="hint">Shared session · results appear on every connected device · pinyin by pypinyin · translation by your local LLM</div>
+  </footer>
+
+<script>
+const feedWrap = document.getElementById('feedWrap');
+const feed = document.getElementById('feed');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const empty = document.getElementById('empty');
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const clearBtn = document.getElementById('clearBtn');
+const modelSel = document.getElementById('modelSel');
+const jumpBtn = document.getElementById('jumpBtn');
+
+// remember the model choice across reloads (per device)
+const savedModel = localStorage.getItem('model');
+if(savedModel !== null && [...modelSel.options].some(o => o.value === savedModel)){
+  modelSel.value = savedModel;
+}
+modelSel.addEventListener('change', ()=> localStorage.setItem('model', modelSel.value));
+const toast = document.getElementById('toast');
+let stick = true;      // whether the feed is pinned to the bottom (auto-scroll)
+let serverBoot = null; // server boot id, to detect an actual reload/restart
+let toastTimer = null;
+
+function showToast(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>toast.classList.remove('show'), 2800);
+}
+
+// Unique id for THIS device, so we only unlock our own input on completion.
+const myCid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+                                                   : String(Math.random());
+
+let ws, wsReady = false, busy = false;
+let currentSegs = null;    // holder for the active exchange's response
+let currentData = [];      // segment data for copy (translate mode)
+let currentMode = 'translate';
+let currentChatEl = null;  // assistant text bubble (chat mode)
+let currentChatText = '';
+
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    wsReady = true; dot.classList.add('on'); statusText.textContent = 'connected';
+    // The server replays the recent feed on connect; clear local DOM first so
+    // a reconnect doesn't duplicate what's already on screen.
+    clearFeed();
+  };
+  ws.onclose = () => { wsReady = false; dot.classList.remove('on'); statusText.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
+  ws.onerror = () => { statusText.textContent = 'connection error'; };
+  ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+}
+
+function clearFeed(){
+  feedWrap.querySelectorAll('.exchange').forEach(e => e.remove());
+  currentSegs = null; currentChatEl = null; currentChatText = ''; currentData = [];
+  busy = false; sendBtn.disabled = false;
+  if(empty) empty.style.display = '';
+  stick = true; jumpBtn.classList.remove('show');
+}
+
+function handleMessage(m){
+  switch(m.type){
+    case 'hello':
+      if(serverBoot && m.boot !== serverBoot) showToast('🔄 Server reloaded');
+      serverBoot = m.boot;
+      break;
+    case 'clear':
+      clearFeed();
+      break;
+    case 'user':
+      if(empty) empty.style.display = 'none';
+      startExchange(m);
+      break;
+    case 'segment':
+      removeTyping();
+      currentData.push(m);
+      if(currentSegs) currentSegs.appendChild(renderSegment(m));
+      scrollDown();
+      break;
+    case 'chat_delta':
+      removeTyping();
+      ensureChatBubble();
+      currentChatText += m.text;
+      currentChatEl.textContent = currentChatText;
+      scrollDown();
+      break;
+    case 'chat_full':          // used during replay
+      removeTyping();
+      ensureChatBubble();
+      currentChatText = m.text;
+      currentChatEl.textContent = m.text;
+      scrollDown();
+      break;
+    case 'done':
+    case 'chat_done':
+      finishResponse(m.cid);
+      break;
+    case 'replay_done':
+      scrollDown();
+      break;
+    case 'error':
+      removeTyping();
+      if(currentSegs){
+        const div = document.createElement('div');
+        div.className = 'err';
+        div.textContent = '⚠ ' + m.message;
+        currentSegs.appendChild(div);
+      }
+      finishResponse(m.cid);
+      break;
+  }
+}
+
+function startExchange(m){
+  currentMode = m.mode;
+  const isChat = m.mode === 'chat';
+  const ex = document.createElement('div');
+  ex.className = 'exchange';
+
+  const um = document.createElement('div');
+  um.className = 'user-msg' + (isChat ? ' ask' : '');
+  um.textContent = isChat ? ('💬 ' + m.text.replace(/^>\s?/, '')) : m.text;
+  ex.appendChild(um);
+
+  currentSegs = document.createElement('div');
+  ex.appendChild(currentSegs);
+  feedWrap.appendChild(ex);
+
+  currentData = [];
+  currentChatEl = null;
+  currentChatText = '';
+  addTyping(currentSegs);
+  if(m.cid === myCid) stick = true;   // jump to bottom for my own sends
+  scrollDown();
+}
+
+function ensureChatBubble(){
+  if(!currentChatEl){
+    currentChatEl = document.createElement('div');
+    currentChatEl.className = 'assistant-msg';
+    if(currentSegs) currentSegs.appendChild(currentChatEl);
+  }
+}
+
+function renderSegment(m){
+  const seg = document.createElement('div');
+  seg.className = 'segment' + (m.speaker ? '' : ' no-speaker');
+  if(m.speaker){
+    const sp = document.createElement('div');
+    sp.className = 'seg-speaker';
+    sp.textContent = m.speaker + ':';
+    seg.appendChild(sp);
+  }
+  const body = document.createElement('div');
+  body.className = 'seg-body';
+  const orig = el('seg-original', m.original);
+  if(m.pinyin){                       // pinyin present => line has Chinese => playable
+    orig.classList.add('playable');
+    orig.title = 'Click to hear it';
+    const icon = document.createElement('span');
+    icon.className = 'play-icon';
+    icon.textContent = ' 🔊';
+    orig.appendChild(icon);
+    orig.addEventListener('click', ()=> speak(m.original, orig));
+  }
+  body.appendChild(orig);
+  if(m.pinyin) body.appendChild(el('seg-pinyin', m.pinyin));
+  if(m.translation) body.appendChild(el('seg-translation', m.translation));
+  if(m.notes) body.appendChild(el('seg-notes', '💡 ' + m.notes));
+  seg.appendChild(body);
+  return seg;
+}
+
+function el(cls, text){
+  const d = document.createElement('div');
+  d.className = cls; d.textContent = text; return d;
+}
+
+// --- click-to-speak: neural TTS (Kokoro via /tts), browser voice as fallback ---
+const TTS_VOICE = 'zf_xiaoxiao';
+let speakingEl = null;
+let currentAudio = null;
+if('speechSynthesis' in window){ speechSynthesis.getVoices(); }  // warm up the fallback voices
+
+function stopSpeaking(){
+  if(currentAudio){ currentAudio.pause(); currentAudio = null; }
+  if('speechSynthesis' in window) speechSynthesis.cancel();
+  if(speakingEl){ speakingEl.classList.remove('speaking'); speakingEl = null; }
+}
+
+function speak(text, elm){
+  if(speakingEl === elm){ stopSpeaking(); return; }   // click again to stop
+  stopSpeaking();
+  speakingEl = elm;
+  elm.classList.add('speaking');
+
+  let fellBack = false;
+  const clear = ()=>{ elm.classList.remove('speaking'); if(speakingEl === elm) speakingEl = null; currentAudio = null; };
+  const fallback = ()=>{ if(fellBack) return; fellBack = true; currentAudio = null; browserSpeak(text, elm); };
+
+  const audio = new Audio(`/tts?voice=${encodeURIComponent(TTS_VOICE)}&text=${encodeURIComponent(text)}`);
+  currentAudio = audio;
+  audio.onended = clear;
+  audio.onerror = fallback;              // sidecar down / error -> browser voice
+  audio.play().catch(fallback);
+}
+
+function browserSpeak(text, elm){
+  if(!('speechSynthesis' in window)){ elm.classList.remove('speaking'); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN';
+  const v = speechSynthesis.getVoices().find(x => /^zh/i.test(x.lang));
+  if(v) u.voice = v;
+  u.rate = 0.95;
+  u.onend = u.onerror = ()=>{ elm.classList.remove('speaking'); if(speakingEl === elm) speakingEl = null; };
+  speechSynthesis.speak(u);
+}
+
+function addTyping(container){
+  const t = document.createElement('div');
+  t.className = 'typing'; t.id = 'typing';
+  t.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(t);
+}
+function removeTyping(){ const t = document.getElementById('typing'); if(t) t.remove(); }
+
+function finishResponse(cid){
+  removeTyping();
+  const tools = document.createElement('div');
+  tools.className = 'resp-tools';
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = 'Copy';
+
+  if(currentMode === 'chat'){
+    if(currentChatText){
+      const txt = currentChatText;
+      btn.onclick = () => copyText(txt, btn);
+      tools.appendChild(btn);
+      if(currentSegs) currentSegs.appendChild(tools);
+    }
+  } else if(currentData.length){
+    const data = currentData.slice();
+    btn.onclick = () => copyResponse(data, btn);
+    tools.appendChild(btn);
+    if(currentSegs) currentSegs.appendChild(tools);
+  }
+
+  currentChatEl = null;
+  currentChatText = '';
+  if(cid === myCid){          // only unlock the device that sent this
+    busy = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
+  scrollDown();
+}
+
+function copyText(text, btn){
+  navigator.clipboard.writeText(text).then(()=>{
+    btn.textContent = 'Copied ✓';
+    setTimeout(()=>btn.textContent = 'Copy', 1500);
+  });
+}
+
+function copyResponse(data, btn){
+  const lines = [];
+  for(const s of data){
+    const prefix = s.speaker ? s.speaker + ': ' : '';
+    const indent = ' '.repeat(prefix.length);
+    lines.push(prefix + s.original);
+    if(s.pinyin) lines.push(indent + s.pinyin);
+    if(s.translation) lines.push(indent + s.translation);
+    if(s.notes) lines.push(indent + '💡 ' + s.notes);
+    lines.push('');
+  }
+  navigator.clipboard.writeText(lines.join('\n').trim()).then(()=>{
+    btn.textContent = 'Copied ✓';
+    setTimeout(()=>btn.textContent = 'Copy', 1500);
+  });
+}
+
+function send(){
+  const text = input.value.trim();
+  if(!text || busy) return;
+  if(text.startsWith('>') && text.replace(/^>\s*/, '').trim() === '') return;  // empty question
+  if(!wsReady){ statusText.textContent = 'not connected yet…'; return; }
+
+  busy = true;
+  sendBtn.disabled = true;
+  ws.send(JSON.stringify({text, cid: myCid, model: modelSel.value}));  // rendering is driven by the server echo
+  input.value = '';
+  updateMode();
+  autosize();
+}
+
+function updateMode(){
+  const chat = input.value.trimStart().startsWith('>');
+  sendBtn.textContent = chat ? 'Ask' : 'Send';
+  document.querySelector('.composer').classList.toggle('ask', chat);
+}
+
+function scrollDown(){
+  // Only auto-scroll when the user is already at the bottom; otherwise flag
+  // that there's new content below without yanking their scroll position.
+  if(stick){ feed.scrollTop = feed.scrollHeight; }
+  else { jumpBtn.classList.add('show'); }
+}
+
+function jumpToLatest(){
+  stick = true;
+  feed.scrollTop = feed.scrollHeight;
+  jumpBtn.classList.remove('show');
+}
+
+feed.addEventListener('scroll', ()=>{
+  const dist = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+  stick = dist < 80;
+  if(stick) jumpBtn.classList.remove('show');
+});
+jumpBtn.addEventListener('click', jumpToLatest);
+
+function autosize(){
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+}
+
+input.addEventListener('input', ()=>{ autosize(); updateMode(); });
+input.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+sendBtn.addEventListener('click', send);
+clearBtn.addEventListener('click', ()=>{
+  if(!wsReady){ clearFeed(); return; }
+  if(confirm('Clear the conversation on all connected devices?')){
+    ws.send(JSON.stringify({action:'clear'}));
+  }
+});
+
+connect();
+autosize();
+</script>
+</body>
+</html>

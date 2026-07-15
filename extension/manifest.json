@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Chinese Hover Translator",
+  "version": "1.0.0",
+  "description": "Hover Chinese text on any page for pinyin, translation, and context notes — powered by your local Mac.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage", "unlimitedStorage"],
+  "host_permissions": [
+    "http://MLTX-TWANG.local:5001/*",
+    "http://localhost:5001/*",
+    "http://192.168.1.6:5001/*",
+    "http://192.168.1.183:5001/*",
+    "https://MLTX-TWANG.local:5001/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Chinese Hover Translator",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  }
+}
