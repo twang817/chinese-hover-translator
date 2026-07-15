@@ -18,10 +18,11 @@ PORT ?= 5001
 TTS_PORT ?= 5060
 NGROK_AUTH ?=
 
-.PHONY: help install install-ml dev run stop stop-tts restart tts ngrok
+.PHONY: help install install-ml dev run stop stop-tts restart tts ngrok ext-zip publish-zip
 
 help:
 	@echo "make install | install-ml | dev | run | stop | restart | tts | ngrok"
+	@echo "     ext-zip (package extension) | publish-zip (release it, tag from manifest version)"
 	@echo "  main app: HOST=$(HOST) PORT=$(PORT)   TTS sidecar: 127.0.0.1:$(TTS_PORT)"
 	@echo "  run 'make tts' in one terminal and 'make dev' in another"
 
@@ -53,6 +54,21 @@ stop:
 	@lsof -ti tcp:$(PORT) | xargs kill 2>/dev/null && echo "stopped port $(PORT)" || echo "nothing running on port $(PORT)"
 
 restart: stop dev
+
+# Package the extension (contents at zip root, as the Web Store / Load-unpacked expect)
+ext-zip:
+	@rm -f chinese-hover-translator.zip
+	@cd extension && zip -q -r ../chinese-hover-translator.zip . -x '*.DS_Store'
+	@echo "built chinese-hover-translator.zip"
+
+# Build the zip and publish it as a GitHub release, tagged v<manifest version>.
+# Bump "version" in extension/manifest.json first (tag must not already exist).
+publish-zip: ext-zip
+	@V=$$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])"); \
+	echo "publishing v$$V"; \
+	gh release create "v$$V" chinese-hover-translator.zip \
+	  --title "v$$V — Chinese Hover Translator" \
+	  --notes "Manifest V3 hover-to-translate extension. Download the zip, unzip, then Load unpacked (chrome://extensions -> Developer mode). Requires your own translator server (see README)."
 
 ngrok:
 ifeq ($(strip $(NGROK_AUTH)),)

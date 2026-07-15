@@ -39,6 +39,8 @@ Then open **http://MLTX-TWANG.local:5001** (or `http://localhost:5001` on the Ma
 | `make stop` / `make stop-tts` | kill the app / the TTS sidecar |
 | `make restart` | `stop` then `dev` |
 | `make ngrok` | expose the port via ngrok (`NGROK_AUTH=user:pass` to password-protect) |
+| `make ext-zip` | package the extension into `chinese-hover-translator.zip` |
+| `make publish-zip` | build the zip + publish a GitHub release, tagged `v<manifest version>` (bump the version in `extension/manifest.json` first) |
 
 Override vars on the command line, e.g. `make dev PORT=5002` or `make run HOST=127.0.0.1`.
 
