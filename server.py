@@ -75,8 +75,12 @@ tone, grammar, slang, culture, or how to phrase something.
 Answer directly and conversationally. When you cite Chinese, include pinyin and a short gloss. \
 Keep answers brief unless the user asks for more depth."""
 
-MAX_HISTORY = 16   # cap conversation turns kept for chat context
-RECENT_MAX = 20    # cap exchanges kept for replay to newly-connected devices
+# History is trimmed to a TOKEN budget (not a fixed message count) so it scales
+# with the model's loaded context length. Reserve headroom for the system prompt,
+# the current input, and the response. Raise this if you raise LM Studio's context
+# (e.g. ~24000 suits a 32K context; ~50000 suits 64K).
+HISTORY_TOKEN_BUDGET = int(os.environ.get("HISTORY_TOKENS", "24000"))
+RECENT_MAX = 40    # cap exchanges kept for replay to newly-connected devices
 
 # ---- pinyin ---------------------------------------------------------------
 HAN_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿]+")
@@ -234,9 +238,27 @@ async def broadcast(obj):
                 _clients.discard(ws)
 
 
+def _est_tokens(text: str) -> int:
+    """Rough token estimate: CJK ~1.3 tok/char, other ~0.28, + per-message overhead."""
+    cjk = sum(1 for c in text if "一" <= c <= "鿿")
+    return int(cjk * 1.3 + (len(text) - cjk) * 0.28) + 4
+
+
+def _trim_history():
+    """Keep the most recent turns that fit within HISTORY_TOKEN_BUDGET."""
+    total, keep = 0, 0
+    for msg in reversed(_history):
+        total += _est_tokens(msg.get("content", ""))
+        if total > HISTORY_TOKEN_BUDGET and keep > 0:
+            break
+        keep += 1
+    if keep < len(_history):
+        del _history[:len(_history) - keep]
+
+
 def _remember(role, content):
     _history.append({"role": role, "content": content})
-    del _history[:-MAX_HISTORY]
+    _trim_history()
 
 
 async def process(text: str, cid, model: str = None):
