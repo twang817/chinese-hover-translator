@@ -113,7 +113,6 @@
     max-height:200px; min-height:52px; outline:none;
   }
   textarea:focus{border-color:var(--accent)}
-  .composer.ask textarea{border-color:var(--accent); background:var(--accent-weak)}
   #send{
     flex:0 0 auto; height:52px; padding:0 20px; border:none; border-radius:14px;
     background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer;
@@ -156,9 +155,9 @@
     <div class="wrap" id="feedWrap">
       <div class="empty" id="empty">
         <div class="big">译</div>
-        Paste a chat log — Chinese, English, emojis, multiple speakers.<br>
-        Each line comes back with pinyin, translation, and context notes.<br>
-        <span style="opacity:.8">Start a line with <b>&gt;</b> to ask the assistant a question instead.</span>
+        Paste a chat log to translate it line-by-line — pinyin, translation, notes.<br>
+        Or type/dictate your own message (Chinese, pinyin, or English) and it'll help you say it.<br>
+        <span style="opacity:.8">Ask a question anytime — it figures out what you need.</span>
       </div>
     </div>
   </div>
@@ -169,7 +168,7 @@
   <footer>
     <div class="wrap">
       <div class="composer">
-        <textarea id="input" placeholder="Paste Chinese to translate…  or start with &gt; to ask the assistant  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+        <textarea id="input" placeholder="Paste a chat log, or type/dictate your own message…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
         <button id="send">Send</button>
       </div>
     </div>
@@ -338,14 +337,13 @@ function handleMessage(m){
 }
 
 function startExchange(m){
-  currentMode = m.mode;
-  const isChat = m.mode === 'chat';
+  currentMode = m.mode;   // 'translate' -> cards, 'chat' -> assistant text
   const ex = document.createElement('div');
   ex.className = 'exchange';
 
   const um = document.createElement('div');
-  um.className = 'user-msg' + (isChat ? ' ask' : '');
-  um.textContent = isChat ? ('💬 ' + m.text.replace(/^>\s?/, '')) : m.text;
+  um.className = 'user-msg';
+  um.textContent = m.text;
   ex.appendChild(um);
 
   currentSegs = document.createElement('div');
@@ -510,21 +508,13 @@ function copyResponse(data, btn){
 function send(){
   const text = input.value.trim();
   if(!text || busy) return;
-  if(text.startsWith('>') && text.replace(/^>\s*/, '').trim() === '') return;  // empty question
   if(!wsReady){ statusText.textContent = 'not connected yet…'; return; }
 
   busy = true;
   sendBtn.disabled = true;
-  ws.send(JSON.stringify({text, cid: myCid, model: modelSel.value}));  // rendering is driven by the server echo
+  ws.send(JSON.stringify({text, cid: myCid, model: modelSel.value}));  // server infers intent
   input.value = '';
-  updateMode();
   autosize();
-}
-
-function updateMode(){
-  const chat = input.value.trimStart().startsWith('>');
-  sendBtn.textContent = chat ? 'Ask' : 'Send';
-  document.querySelector('.composer').classList.toggle('ask', chat);
 }
 
 function scrollDown(){
@@ -552,7 +542,7 @@ function autosize(){
   input.style.height = Math.min(input.scrollHeight, 200) + 'px';
 }
 
-input.addEventListener('input', ()=>{ autosize(); updateMode(); });
+input.addEventListener('input', autosize);
 input.addEventListener('keydown', (e)=>{
   if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
 });

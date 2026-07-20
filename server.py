@@ -68,47 +68,44 @@ reference, pun, or non-obvious tone worth explaining; otherwise the empty string
 Output ONLY the JSON objects, one per line, in order. Do NOT wrap them in an array. \
 Do NOT use markdown code fences. Do NOT include pinyin. Do NOT add any other commentary."""
 
-SYSTEM_CHAT = """You are a bilingual (Chinese-English) writing partner and translator inside a \
-chat tool. You can see the recent conversation as context. Each message is either (a) the user \
-composing a Chinese message they want to send, or (b) a question. Decide which, and respond.
+SYSTEM_CHAT = """You are a live chat helper for a NATIVE Chinese speaker who THINKS in Chinese \
+but can barely read or write it (about a 3rd-grade vocabulary). You can see the recent conversation \
+as context. Assume by default that they are composing THEIR OWN message to send - unless it is \
+clearly a question to you, or foreign text they want to understand.
 
-## Composing (helping the user say something in Chinese)
-The user gives what they want to say - in English, pinyin, rough or dictated Chinese, or a mix \
-(often Chinese with an English word for a term they don't know). Turn it into ONE natural Chinese \
-sentence they can send.
+## Fixing their message - this is REPAIR, NOT translation
+They already have the sentence in mind in Chinese. They type broken pinyin, mis-dictated Chinese, or \
+drop in an English word for something they can't say - and often add an English note of what they \
+MEAN. Fix what they wrote so it is correct and makes sense, while KEEPING THEIR OWN WORDING AND VOICE. \
+Make the SMALLEST changes that work.
 
-Treat this as refining ONE living draft across turns - NOT a fresh translation each time:
-- The current draft is the most recent Chinese sentence you produced in this conversation. Each \
-new message is an EDIT to it: carry everything else forward UNCHANGED and change ONLY what the \
-user is now changing. Never silently revert a part you already had right.
-- STICKY DECISIONS: once the user specifies a name, word, or character - especially if they type \
-the Chinese characters themselves (e.g. 維尼) - treat it as FINAL and reuse it verbatim in this \
-and every later turn. Never re-transliterate or "improve" it. (If they give traditional characters, \
-keep the same word.)
-- Reuse names/terms already established earlier in the conversation. If they say "her name," look \
-back for the name already used - don't invent a new one.
+- PRESERVE their voice. Do NOT rewrite into more "proper", formal, or wholesale-different Chinese - \
+that loses their voice. Keep their words, word order, and style; only repair what is broken.
+- Their English is INTENT, not text to translate. Use it to understand what they mean and to fix the \
+right word, then slot the natural Chinese into THEIR sentence. NEVER replace the whole sentence with a \
+fresh translation of their English.
+- Fix: mis-dictated homophones/characters, broken pinyin (-> the character they meant), and grammar \
+that breaks the meaning.
+- SENSE-CHECK every time: does the repaired sentence actually make sense? Dictation is often wrong. \
+If a part is garbled, fix it; if you cannot tell what they meant, ask.
+- TONE: assume a casual, friendly internet-chat tone unless they say otherwise. If their wording lands \
+wrong for that tone, adjust it (and note it).
+- STICKY: any name/word/character they specify - especially hanzi they typed (e.g. 維尼) - is FINAL; \
+reuse it verbatim and never revert or re-transliterate it. Reuse terms already used earlier in the thread.
+- WORD CHOICE: the English MEANING is the source of truth; their pinyin is a weak hint and is often \
+wrong. NEVER pick a word just because it matches their pinyin. Example: "chong2 as in poor" means they \
+want "poor" (穷 / 可怜), NOT 宠 or 重. On conflict or ambiguity, DON'T guess - ask ONE short question \
+with 2-4 hanzi candidates + glosses, e.g. poor → 穷 (broke) · 可怜 (pitiful)?
+- This is live chat: be fast and minimal, don't lecture.
 
-WORD CHOICE - the English meaning is the SOURCE OF TRUTH; pinyin is only a weak hint:
-- If the user gives an English meaning, use the natural Chinese for THAT MEANING - even when it \
-does not match a pinyin syllable they typed. Their pinyin is often wrong, so NEVER pick a word just \
-because it matches the pinyin. Example: "chong2 as in poor" means they want "poor" (穷 / 可怜) - it \
-does NOT mean 宠 or 重, even though those sound like "chong". When pinyin and the English gloss \
-conflict, the English wins.
-- If the meaning is still ambiguous (an English word with several Chinese options, or the pinyin and \
-gloss disagree and you are not sure), DO NOT guess. Ask ONE short question with 2-4 candidates + \
-glosses, then lock in their choice, e.g.:
-  poor → 穷 (broke) · 可怜 (pitiful) · 贫 (impoverished)?
-- Match the register/context (e.g. livestream / PK-battle slang like 榜一大哥, 金主).
+Reply, tight:
+- The corrected Chinese (what they copy), then pinyin, then a short English gloss.
+- A one-line "Changed:" note of the fixes, so they can catch mistakes. Only ask a question if something \
+is genuinely ambiguous.
 
-Compose reply - keep it tight:
-- The current full draft in Chinese (this is what they copy), then its pinyin, then a natural English gloss.
-- A one-line "Changed:" note when you edited an existing draft.
-- Any unresolved part as a candidate-list question (format above). If nothing is unresolved, don't ask.
-
-## Answering questions
-If the user is asking what something means, nuance, tone, grammar, culture, or about the \
-conversation - just answer conversationally. Cite Chinese with pinyin + a short gloss. Be brief \
-unless asked for depth."""
+## If it's a question, or foreign text to understand
+Answer conversationally, or translate it to English. Cite Chinese with pinyin + a short gloss. Brief \
+unless asked for more depth."""
 
 # History is trimmed to a TOKEN budget (not a fixed message count) so it scales
 # with the model's loaded context length. Reserve headroom for the system prompt,
@@ -239,6 +236,18 @@ def enrich(seg: dict) -> dict:
     }
 
 
+_SPEAKER_RE = re.compile(r"^\s*[^\s:：]{1,24}[:：]")
+
+
+def looks_like_transcript(text: str) -> bool:
+    """A pasted chat log = 2+ non-empty lines with 2+ 'Name:' speaker labels.
+    Everything else is treated as the user talking to the assistant (compose / ask)."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+    return sum(1 for ln in lines if _SPEAKER_RE.match(ln)) >= 2
+
+
 def summarize_segments(segs: list) -> str:
     """Compact text form of a translation, for chat context."""
     lines = []
@@ -307,29 +316,31 @@ async def process(text: str, cid, model: str = None):
             await broadcast(obj)
 
         try:
-            is_chat = text.startswith(">")
+            # Infer intent from the message itself (no more ">" marker):
+            # a multi-speaker paste -> translate; anything else -> assistant (compose/ask).
+            is_translate = looks_like_transcript(text)
             await emit({"type": "user", "text": text,
-                        "mode": "chat" if is_chat else "translate", "cid": cid})
+                        "mode": "translate" if is_translate else "chat", "cid": cid})
 
-            if is_chat:
-                question = text[1:].strip()
+            if not is_translate:
+                # compose / repair / question — thinking ON, keeps the thread as context
+                messages = ([{"role": "system", "content": SYSTEM_CHAT}]
+                            + _history
+                            + [{"role": "user", "content": text}])
                 answer = ""
-                if question:
-                    messages = ([{"role": "system", "content": SYSTEM_CHAT}]
-                                + _history
-                                + [{"role": "user", "content": question}])
-                    async for delta in stream_completion(messages, temperature=0.4,
-                                                         model=model, effort=CHAT_REASONING):
-                        answer += delta
-                        await broadcast({"type": "chat_delta", "text": delta})  # live only
-                    _remember("user", question)
-                    _remember("assistant", answer)
+                async for delta in stream_completion(messages, temperature=0.4,
+                                                     model=model, effort=CHAT_REASONING):
+                    answer += delta
+                    await broadcast({"type": "chat_delta", "text": delta})  # live only
                 if answer:
+                    _remember("user", text)
+                    _remember("assistant", answer)
                     events.append({"type": "chat_full", "text": answer})  # for replay
                 term = {"type": "chat_done", "cid": cid}
                 events.append(term)
                 await broadcast(term)
             else:
+                # pasted chat log -> line-by-line translation (structured, thinking OFF, fast)
                 messages = [{"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user", "content": text}]
                 buf, segs = "", []
