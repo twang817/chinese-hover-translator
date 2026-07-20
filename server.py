@@ -386,14 +386,16 @@ async def ws_endpoint(ws: WebSocket):
     # Send hello (boot id) + replay the recent feed BEFORE registering for live
     # broadcasts, all under the process lock, so a newly-opened/reconnected
     # device can't receive a live event before it has caught up.
+    skip_replay = ws.query_params.get("replay") == "0"   # reconnecting client keeps its feed
     async with _process_lock:
         await ws.send_text(json.dumps({"type": "hello", "boot": BOOT_ID}))
-        had_recent = bool(_recent)
-        for exchange in _recent:
-            for ev in exchange:
-                await ws.send_text(json.dumps(ev, ensure_ascii=False))
-        if had_recent:
-            await ws.send_text(json.dumps({"type": "replay_done"}))
+        if not skip_replay:
+            had_recent = bool(_recent)
+            for exchange in _recent:
+                for ev in exchange:
+                    await ws.send_text(json.dumps(ev, ensure_ascii=False))
+            if had_recent:
+                await ws.send_text(json.dumps({"type": "replay_done"}))
         async with _clients_lock:
             _clients.add(ws)
     try:

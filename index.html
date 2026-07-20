@@ -213,6 +213,7 @@ const myCid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
 let ws, wsReady = false, busy = false;
 let reconnectTimer = null, reconnectDelay = 1500;
 let heartbeatTimer = null, lastPong = 0;
+let firstConnect = true;   // only replay + clear the feed on the very first connect
 let currentSegs = null;    // holder for the active exchange's response
 let currentData = [];      // segment data for copy (translate mode)
 let currentMode = 'translate';
@@ -223,14 +224,15 @@ function connect(){
   if(ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
   clearTimeout(reconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  try { ws = new WebSocket(`${proto}://${location.host}/ws`); }
+  // On reconnect, keep the existing feed and ask the server to skip the replay,
+  // so a reconnect doesn't rebuild the feed (which would yank scroll to bottom).
+  const url = `${proto}://${location.host}/ws` + (firstConnect ? '' : '?replay=0');
+  try { ws = new WebSocket(url); }
   catch(e){ scheduleReconnect(); return; }
   ws.onopen = () => {
     wsReady = true; reconnectDelay = 1500; lastPong = Date.now();
     dot.classList.add('on'); statusText.textContent = 'connected';
-    // The server replays the recent feed on connect; clear local DOM first so
-    // a reconnect doesn't duplicate what's already on screen.
-    clearFeed();
+    if(firstConnect){ firstConnect = false; clearFeed(); }  // fresh load: clear + await replay
     startHeartbeat();
   };
   ws.onclose = () => { wsReady = false; dot.classList.remove('on'); statusText.textContent = 'reconnecting…'; scheduleReconnect(); };
@@ -285,7 +287,7 @@ function handleMessage(m){
       lastPong = Date.now();
       break;
     case 'hello':
-      if(serverBoot && m.boot !== serverBoot) showToast('🔄 Server reloaded');
+      if(serverBoot && m.boot !== serverBoot){ showToast('🔄 Server reloaded'); clearFeed(); }
       serverBoot = m.boot;
       break;
     case 'clear':
