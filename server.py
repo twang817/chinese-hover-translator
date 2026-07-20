@@ -34,7 +34,8 @@ LLM_BASE = os.environ.get("LLM_BASE", "http://localhost:1234/v1")
 LLM_MODEL_FALLBACK = os.environ.get("LLM_MODEL", "qwen/qwen3.6-35b-a3b")
 # Reasoning models (e.g. Qwen3.5-9B) otherwise emit a long hidden "thinking" phase
 # before any output -> big first-token delay. Translation needs no chain-of-thought.
-REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "none")  # "" to leave model default
+REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "none")   # translation: fast, no thinking
+CHAT_REASONING = os.environ.get("CHAT_REASONING", "high")       # compose/answer: think for accuracy
 TTS_BASE = os.environ.get("TTS_BASE", "http://127.0.0.1:5060")  # Kokoro sidecar (ml-venv)
 HOST = os.environ.get("HOST", "0.0.0.0")   # reachable from PC/phone; set 127.0.0.1 to lock to this Mac
 PORT = int(os.environ.get("PORT", "5001"))
@@ -67,13 +68,47 @@ reference, pun, or non-obvious tone worth explaining; otherwise the empty string
 Output ONLY the JSON objects, one per line, in order. Do NOT wrap them in an array. \
 Do NOT use markdown code fences. Do NOT include pinyin. Do NOT add any other commentary."""
 
-SYSTEM_CHAT = """You are a friendly, concise bilingual (Chinese-English) assistant embedded \
-in a translation app. The user is reading Chinese chat logs - you may see recent ones earlier \
-in this conversation as context - and will ask you questions: what something means, nuance, \
-tone, grammar, slang, culture, or how to phrase something.
+SYSTEM_CHAT = """You are a bilingual (Chinese-English) writing partner and translator inside a \
+chat tool. You can see the recent conversation as context. Each message is either (a) the user \
+composing a Chinese message they want to send, or (b) a question. Decide which, and respond.
 
-Answer directly and conversationally. When you cite Chinese, include pinyin and a short gloss. \
-Keep answers brief unless the user asks for more depth."""
+## Composing (helping the user say something in Chinese)
+The user gives what they want to say - in English, pinyin, rough or dictated Chinese, or a mix \
+(often Chinese with an English word for a term they don't know). Turn it into ONE natural Chinese \
+sentence they can send.
+
+Treat this as refining ONE living draft across turns - NOT a fresh translation each time:
+- The current draft is the most recent Chinese sentence you produced in this conversation. Each \
+new message is an EDIT to it: carry everything else forward UNCHANGED and change ONLY what the \
+user is now changing. Never silently revert a part you already had right.
+- STICKY DECISIONS: once the user specifies a name, word, or character - especially if they type \
+the Chinese characters themselves (e.g. 維尼) - treat it as FINAL and reuse it verbatim in this \
+and every later turn. Never re-transliterate or "improve" it. (If they give traditional characters, \
+keep the same word.)
+- Reuse names/terms already established earlier in the conversation. If they say "her name," look \
+back for the name already used - don't invent a new one.
+
+WORD CHOICE - the English meaning is the SOURCE OF TRUTH; pinyin is only a weak hint:
+- If the user gives an English meaning, use the natural Chinese for THAT MEANING - even when it \
+does not match a pinyin syllable they typed. Their pinyin is often wrong, so NEVER pick a word just \
+because it matches the pinyin. Example: "chong2 as in poor" means they want "poor" (穷 / 可怜) - it \
+does NOT mean 宠 or 重, even though those sound like "chong". When pinyin and the English gloss \
+conflict, the English wins.
+- If the meaning is still ambiguous (an English word with several Chinese options, or the pinyin and \
+gloss disagree and you are not sure), DO NOT guess. Ask ONE short question with 2-4 candidates + \
+glosses, then lock in their choice, e.g.:
+  poor → 穷 (broke) · 可怜 (pitiful) · 贫 (impoverished)?
+- Match the register/context (e.g. livestream / PK-battle slang like 榜一大哥, 金主).
+
+Compose reply - keep it tight:
+- The current full draft in Chinese (this is what they copy), then its pinyin, then a natural English gloss.
+- A one-line "Changed:" note when you edited an existing draft.
+- Any unresolved part as a candidate-list question (format above). If nothing is unresolved, don't ask.
+
+## Answering questions
+If the user is asking what something means, nuance, tone, grammar, culture, or about the \
+conversation - just answer conversationally. Cite Chinese with pinyin + a short gloss. Be brief \
+unless asked for depth."""
 
 # History is trimmed to a TOKEN budget (not a fixed message count) so it scales
 # with the model's loaded context length. Reserve headroom for the system prompt,
@@ -157,16 +192,18 @@ async def get_model() -> str:
     return LLM_MODEL_FALLBACK
 
 
-async def stream_completion(messages: list, temperature: float = 0.3, model: str = None):
+async def stream_completion(messages: list, temperature: float = 0.3, model: str = None,
+                            effort: str = None):
     """Yield content deltas from the LLM as they arrive (non-blocking)."""
+    eff = effort if effort is not None else REASONING_EFFORT
     payload = {
         "model": model or await get_model(),
         "messages": messages,
         "temperature": temperature,
         "stream": True,
     }
-    if REASONING_EFFORT:
-        payload["reasoning_effort"] = REASONING_EFFORT
+    if eff:
+        payload["reasoning_effort"] = eff
     timeout = httpx.Timeout(600.0, connect=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", f"{LLM_BASE}/chat/completions", json=payload) as r:
@@ -281,7 +318,8 @@ async def process(text: str, cid, model: str = None):
                     messages = ([{"role": "system", "content": SYSTEM_CHAT}]
                                 + _history
                                 + [{"role": "user", "content": question}])
-                    async for delta in stream_completion(messages, temperature=0.4, model=model):
+                    async for delta in stream_completion(messages, temperature=0.4,
+                                                         model=model, effort=CHAT_REASONING):
                         answer += delta
                         await broadcast({"type": "chat_delta", "text": delta})  # live only
                     _remember("user", question)
