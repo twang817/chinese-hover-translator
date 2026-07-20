@@ -403,6 +403,9 @@ async def ws_endpoint(ws: WebSocket):
                 data = json.loads(msg)
             except Exception:
                 continue
+            if data.get("type") == "ping":            # heartbeat from the client
+                await ws.send_text(json.dumps({"type": "pong"}))
+                continue
             if data.get("action") == "clear":
                 async with _process_lock:
                     _recent.clear()

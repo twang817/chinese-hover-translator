@@ -211,6 +211,8 @@ const myCid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
                                                    : String(Math.random());
 
 let ws, wsReady = false, busy = false;
+let reconnectTimer = null, reconnectDelay = 1500;
+let heartbeatTimer = null, lastPong = 0;
 let currentSegs = null;    // holder for the active exchange's response
 let currentData = [];      // segment data for copy (translate mode)
 let currentMode = 'translate';
@@ -218,18 +220,56 @@ let currentChatEl = null;  // assistant text bubble (chat mode)
 let currentChatText = '';
 
 function connect(){
+  if(ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  clearTimeout(reconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  try { ws = new WebSocket(`${proto}://${location.host}/ws`); }
+  catch(e){ scheduleReconnect(); return; }
   ws.onopen = () => {
-    wsReady = true; dot.classList.add('on'); statusText.textContent = 'connected';
+    wsReady = true; reconnectDelay = 1500; lastPong = Date.now();
+    dot.classList.add('on'); statusText.textContent = 'connected';
     // The server replays the recent feed on connect; clear local DOM first so
     // a reconnect doesn't duplicate what's already on screen.
     clearFeed();
+    startHeartbeat();
   };
-  ws.onclose = () => { wsReady = false; dot.classList.remove('on'); statusText.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
-  ws.onerror = () => { statusText.textContent = 'connection error'; };
+  ws.onclose = () => { wsReady = false; dot.classList.remove('on'); statusText.textContent = 'reconnecting…'; scheduleReconnect(); };
+  ws.onerror = () => { try { ws.close(); } catch(e){} };  // let onclose drive the retry
   ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
 }
+
+function scheduleReconnect(){
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), 10000);  // backoff, capped
+}
+
+// Reconnect promptly when the tab wakes/returns — the reconnect timer is frozen
+// while a phone sleeps, so these events are what actually revive the connection.
+function ensureConnected(){
+  if(!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING){
+    reconnectDelay = 1500; connect();
+  } else if(ws.readyState === WebSocket.OPEN){
+    try { ws.send(JSON.stringify({type:'ping'})); } catch(e){ try{ ws.close(); }catch(_){} }
+  }
+}
+
+// Heartbeat: ping periodically; if pongs stop coming the socket is silently dead
+// (common after mobile sleep) — close it so onclose triggers a reconnect.
+function startHeartbeat(){
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
+    if(document.visibilityState !== 'visible') return;
+    if(!ws || ws.readyState !== WebSocket.OPEN) return;
+    if(Date.now() - lastPong > 40000){ try { ws.close(); } catch(e){} return; }
+    try { ws.send(JSON.stringify({type:'ping'})); } catch(e){}
+  }, 20000);
+}
+
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') ensureConnected(); });
+window.addEventListener('online', ensureConnected);
+window.addEventListener('focus', ensureConnected);
+window.addEventListener('pageshow', ensureConnected);   // restored from bfcache
 
 function clearFeed(){
   feedWrap.querySelectorAll('.exchange').forEach(e => e.remove());
@@ -241,6 +281,9 @@ function clearFeed(){
 
 function handleMessage(m){
   switch(m.type){
+    case 'pong':
+      lastPong = Date.now();
+      break;
     case 'hello':
       if(serverBoot && m.boot !== serverBoot) showToast('🔄 Server reloaded');
       serverBoot = m.boot;
